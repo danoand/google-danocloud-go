@@ -127,6 +127,7 @@ func foofile(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, my_file)
 }
 
+// Main program
 func main() {
 	// Set up a middleware handler using Alice
 	commonHandlers := alice.New(loggingHandler, recoverHandler)

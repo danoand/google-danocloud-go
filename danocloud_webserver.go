@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/justinas/alice"
+	"gopkg.in/yaml.v2"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +15,51 @@ import (
 	"strings"
 	"time"
 )
+
+type yamlobject interface{}
+
+var My_yaml_obj yamlobject
+
+type Container struct {
+	Data interface{}
+}
+
+// Function that creates a variable of type Container
+func NewContainer(in_data yamlobject) Container {
+	// Create the new variable
+	var c Container
+	c.Data = in_data
+
+	// Return the Container
+	return c
+}
+
+// Function that reads a yaml file and parses contents into a Go data structure
+func readyaml(in_file string, yaml_dest *yamlobject) (int, error) {
+	// Check inbound parameters
+	if len(in_file) < 1 {
+		// Don't have a valid file to read
+		return 0, errors.New("No valid file to read")
+	}
+
+	// Read file into a buffer (NOTE: could be issues with large files!)
+	yamlbuf, err := ioutil.ReadFile(in_file)
+	if err != nil {
+		// Error opening the file
+		return 0, err
+	}
+
+	// Parse the byte slice
+	err_unmarshall := yaml.Unmarshal(yamlbuf, yaml_dest)
+	if err_unmarshall != nil {
+		// Error decoding the yaml content
+		return 0, err_unmarshall
+	}
+
+	// Return to caller
+	return len(yamlbuf), nil
+
+}
 
 // Middleware handler function that logs inbound request information
 func loggingHandler(next http.Handler) http.Handler {
@@ -71,6 +119,19 @@ func panicmeHandler(w http.ResponseWriter, r *http.Request) {
 	panic(fmt.Sprint("Here we go... panicing keep this serva up!"))
 }
 
+// Function that handles request to '/yamlme'
+func (c *Container) yamlmeHandler(w http.ResponseWriter, r *http.Request) {
+	// Convert the parsed yaml object to json and write to the response
+	//    marshal or create the json from the underlying object
+	tmp_write_this := fmt.Sprint(c.Data)
+
+	// Set the mime type of the data being returned in the response
+	w.Header().Set("Content-Type", "text/plain")
+
+	// Write the json to the response
+	w.Write([]byte(tmp_write_this))
+}
+
 // Function that handles embedded path variables
 func pathParamsHandler(w http.ResponseWriter, r *http.Request) {
 	// Declare a map to be used as the json response
@@ -127,8 +188,20 @@ func foofile(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, my_file)
 }
 
-// Main 
+// Main
 func main() {
+	// Read the yaml file and parse contents into my pre-declared object
+	num_bytes, err := readyaml("mytest.yaml", &My_yaml_obj)
+	if err != nil {
+		log.Println("An error occurred executing the parsing function:", err)
+		os.Exit(1)
+	} else {
+		log.Println("Processed a yaml file with number of bytes:", num_bytes)
+	}
+
+	// Create a data container as a store for the object that was just parsed
+	my_data_store := NewContainer(My_yaml_obj)
+
 	// Set up a middleware handler using Alice
 	commonHandlers := alice.New(loggingHandler, recoverHandler)
 
@@ -136,6 +209,12 @@ func main() {
 	http.Handle("/params/", commonHandlers.ThenFunc(pathParamsHandler)) // IMPORTANT: Notice the '/' at the end of path pattern
 	http.Handle("/panicme", commonHandlers.ThenFunc(panicmeHandler))
 	http.Handle("/public/", commonHandlers.ThenFunc(staticHandler)) // IMPORTANT: Notice the '/' at the end of path pattern
+  
+  // Description of what's happening below...
+  //   - assigning to '/yamlme' a method to a type that implements the handler interface
+  //   - this enables me to "pass" data (a Struct field included in the type) that that route handler function will use
+  //       (there may be other ways to acheive this)
+	http.Handle("/yamlme", commonHandlers.ThenFunc(my_data_store.yamlmeHandler))
 	http.Handle("/", commonHandlers.ThenFunc(indexHandler))
 
 	// Start the web server listening on the specified port
